@@ -75,9 +75,14 @@ class KafkaWriter<K, V> extends DoFn<ProducerRecord<K, V>, Void> {
       }
     }
 
-    @Nullable String topicName = record.topic();
-    if (topicName == null) {
-      topicName = Preconditions.checkStateNotNull(spec.getTopic());
+    @Nullable String topicName;
+    if (spec.getTopicFn() != null) {
+      topicName = spec.getTopicFn().apply(record);
+    } else {
+      topicName = record.topic();
+      if (topicName == null) {
+        topicName = Preconditions.checkStateNotNull(spec.getTopic());
+      }
     }
 
     try {

@@ -34,6 +34,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
 import static org.junit.internal.matchers.ThrowableCauseMatcher.hasCause;
 import static org.junit.internal.matchers.ThrowableMessageMatcher.hasMessage;
@@ -67,6 +68,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.Pipeline.PipelineExecutionException;
 import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.coders.BigEndianIntegerCoder;
@@ -118,6 +120,7 @@ import org.apache.beam.sdk.util.CoderUtils;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.PCollectionList;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.apache.beam.sdk.values.TypeDescriptors;
 import org.apache.beam.vendor.guava.v32_1_2_jre.com.google.common.base.Strings;
 import org.apache.beam.vendor.guava.v32_1_2_jre.com.google.common.collect.ImmutableList;
@@ -1888,6 +1891,93 @@ public class KafkaIOTest {
         assertEquals(i, record.timestamp().intValue());
         assertEquals(0, record.headers().toArray().length);
       }
+    }
+  }
+
+  @Test
+  public void testWriteRecordsWithTopicFn() throws Exception {
+    int numElements = 100;
+
+    try (MockProducerWrapper producerWrapper = new MockProducerWrapper(new LongSerializer())) {
+      ProducerSendCompletionThread completionThread =
+          new ProducerSendCompletionThread(producerWrapper.mockProducer).start();
+
+      p.apply(mkKafkaReadTransform(numElements, new ValueAsTimestampFn()).withoutMetadata())
+          .apply(
+              MapElements.into(new TypeDescriptor<ProducerRecord<Integer, Long>>() {})
+                  .via(
+                      kv ->
+                          new ProducerRecord<Integer, Long>(
+                              "__placeholder__", kv.getKey(), kv.getValue())))
+          .setCoder(ProducerRecordCoder.of(VarIntCoder.of(), VarLongCoder.of()))
+          .apply(
+              KafkaIO.<Integer, Long>writeRecords()
+                  .withBootstrapServers("none")
+                  .withKeySerializer(IntegerSerializer.class)
+                  .withValueSerializer(LongSerializer.class)
+                  // No withTopic() — use topicFn instead
+                  .withTopicFn(record -> record.key() % 2 == 0 ? "even_topic" : "odd_topic")
+                  .withProducerFactoryFn(new ProducerFactoryFn(producerWrapper.producerKey)));
+
+      p.run();
+      completionThread.shutdown();
+
+      List<ProducerRecord<Integer, Long>> sent = producerWrapper.mockProducer.history();
+      assertEquals(numElements, sent.size());
+      for (ProducerRecord<Integer, Long> record : sent) {
+        String expectedTopic = record.key() % 2 == 0 ? "even_topic" : "odd_topic";
+        assertEquals(expectedTopic, record.topic());
+      }
+    }
+  }
+
+  @Test
+  public void testWriteKVWithTopicFn() throws Exception {
+    int numElements = 100;
+
+    try (MockProducerWrapper producerWrapper = new MockProducerWrapper(new LongSerializer())) {
+      ProducerSendCompletionThread completionThread =
+          new ProducerSendCompletionThread(producerWrapper.mockProducer).start();
+
+      p.apply(mkKafkaReadTransform(numElements, new ValueAsTimestampFn()).withoutMetadata())
+          .apply(
+              KafkaIO.<Integer, Long>write()
+                  .withBootstrapServers("none")
+                  .withKeySerializer(IntegerSerializer.class)
+                  .withValueSerializer(LongSerializer.class)
+                  // No withTopic() — use topicFn instead
+                  .withTopicFn(kv -> kv.getKey() % 2 == 0 ? "even_topic" : "odd_topic")
+                  .withProducerFactoryFn(new ProducerFactoryFn(producerWrapper.producerKey)));
+
+      p.run();
+      completionThread.shutdown();
+
+      List<ProducerRecord<Integer, Long>> sent = producerWrapper.mockProducer.history();
+      assertEquals(numElements, sent.size());
+      for (ProducerRecord<Integer, Long> record : sent) {
+        String expectedTopic = record.key() % 2 == 0 ? "even_topic" : "odd_topic";
+        assertEquals(expectedTopic, record.topic());
+      }
+    }
+  }
+
+  @Test
+  public void testWriteRecordsWithTopicFnAndEOSIsRejected() {
+    // withTopicFn() must be rejected when isEOS() is true
+    Pipeline p2 = Pipeline.create();
+    try {
+      p2.apply(Create.empty(ProducerRecordCoder.of(VarIntCoder.of(), VarLongCoder.of())))
+          .apply(
+              KafkaIO.<Integer, Long>writeRecords()
+                  .withBootstrapServers("none")
+                  .withKeySerializer(IntegerSerializer.class)
+                  .withValueSerializer(LongSerializer.class)
+                  .withTopicFn(record -> "topic")
+                  .withEOS(1, "test-group"));
+      p2.run();
+      fail("Expected IllegalArgumentException for topicFn + EOS");
+    } catch (IllegalArgumentException e) {
+      assertThat(e.getMessage(), containsString("withTopicFn"));
     }
   }
 

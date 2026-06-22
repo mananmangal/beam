@@ -3166,6 +3166,9 @@ public class KafkaIO {
     public abstract @Nullable String getTopic();
 
     @Pure
+    public abstract @Nullable SerializableFunction<ProducerRecord<K, V>, String> getTopicFn();
+
+    @Pure
     public abstract Map<String, Object> getProducerConfig();
 
     @Pure
@@ -3211,6 +3214,9 @@ public class KafkaIO {
     @AutoValue.Builder
     abstract static class Builder<K, V> {
       abstract Builder<K, V> setTopic(String topic);
+
+      abstract Builder<K, V> setTopicFn(
+          @Nullable SerializableFunction<ProducerRecord<K, V>, String> topicFn);
 
       abstract Builder<K, V> setProducerConfig(Map<String, Object> producerConfig);
 
@@ -3260,6 +3266,22 @@ public class KafkaIO {
      */
     public WriteRecords<K, V> withTopic(String topic) {
       return toBuilder().setTopic(topic).build();
+    }
+
+    /**
+     * Sets a function to determine the Kafka topic for each record dynamically. The function
+     * receives a {@link ProducerRecord} and returns the topic name to write to.
+     *
+     * <p>When set, this function is evaluated for <em>every</em> record and its return value
+     * determines the Kafka topic to write to. It takes priority over the record's own {@link
+     * ProducerRecord#topic()} value — i.e., the record's topic is ignored whenever this function is
+     * configured.
+     *
+     * <p>Cannot be combined with exactly-once semantics ({@link #withEOS}).
+     */
+    public WriteRecords<K, V> withTopicFn(
+        SerializableFunction<ProducerRecord<K, V>, String> topicFn) {
+      return toBuilder().setTopicFn(topicFn).build();
     }
 
     /**
@@ -3415,6 +3437,9 @@ public class KafkaIO {
       checkArgument(getValueSerializer() != null, "withValueSerializer() is required");
 
       if (isEOS()) {
+        checkArgument(
+            getTopicFn() == null,
+            "withTopicFn() is not supported with exactly-once semantics; use withTopic() instead");
         checkArgument(getTopic() != null, "withTopic() is required when isEOS() is true");
         checkArgument(
             getBadRecordErrorHandler() instanceof DefaultErrorHandler,
@@ -3511,6 +3536,8 @@ public class KafkaIO {
 
     abstract @Nullable String getTopic();
 
+    abstract @Nullable SerializableFunction<KV<K, V>, String> getTopicFn();
+
     public abstract WriteRecords<K, V> getWriteRecordsTransform();
 
     abstract Builder<K, V> toBuilder();
@@ -3520,6 +3547,8 @@ public class KafkaIO {
         implements ExternalTransformBuilder<
             Write.External.Configuration, PCollection<KV<K, V>>, PDone> {
       abstract Builder<K, V> setTopic(String topic);
+
+      abstract Builder<K, V> setTopicFn(@Nullable SerializableFunction<KV<K, V>, String> topicFn);
 
       abstract Builder<K, V> setWriteRecordsTransform(WriteRecords<K, V> transform);
 
@@ -3616,6 +3645,16 @@ public class KafkaIO {
           .setTopic(topic)
           .setWriteRecordsTransform(getWriteRecordsTransform().withTopic(topic))
           .build();
+    }
+
+    /**
+     * Sets a function to determine the Kafka topic for each KV record dynamically. The function
+     * receives the {@link KV} element and returns the topic name to write to.
+     *
+     * <p>Cannot be combined with exactly-once semantics ({@link #withEOS}).
+     */
+    public Write<K, V> withTopicFn(SerializableFunction<KV<K, V>, String> topicFn) {
+      return toBuilder().setTopicFn(topicFn).build();
     }
 
     /**
@@ -3750,7 +3789,15 @@ public class KafkaIO {
 
     @Override
     public PDone expand(PCollection<KV<K, V>> input) {
-      final String topic = Preconditions.checkStateNotNull(getTopic(), "withTopic() is required");
+      checkArgument(
+          getTopic() != null || getTopicFn() != null,
+          "withTopic() or withTopicFn() is required for KafkaIO.Write");
+      checkArgument(
+          !getWriteRecordsTransform().isEOS() || getTopicFn() == null,
+          "withTopicFn() is not supported with exactly-once semantics; use withTopic() instead");
+
+      final @Nullable String topic = getTopic();
+      final @Nullable SerializableFunction<KV<K, V>, String> topicFn = getTopicFn();
 
       KvCoder<K, V> kvCoder = (KvCoder<K, V>) input.getCoder();
       return input
@@ -3760,7 +3807,12 @@ public class KafkaIO {
                   new SimpleFunction<KV<K, V>, ProducerRecord<K, V>>() {
                     @Override
                     public ProducerRecord<K, V> apply(KV<K, V> element) {
-                      return new ProducerRecord<>(topic, element.getKey(), element.getValue());
+                      String resolvedTopic =
+                          Preconditions.checkStateNotNull(
+                              topicFn != null ? topicFn.apply(element) : topic,
+                              "topic must not be null");
+                      return new ProducerRecord<>(
+                          resolvedTopic, element.getKey(), element.getValue());
                     }
                   }))
           .setCoder(ProducerRecordCoder.of(kvCoder.getKeyCoder(), kvCoder.getValueCoder()))

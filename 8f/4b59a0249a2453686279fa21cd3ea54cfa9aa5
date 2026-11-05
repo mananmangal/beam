@@ -1,0 +1,19 @@
+sdks/java/io/iceberg/src/test/java/org/apache/beam/sdk/io/iceberg/IcebergUtilsTest.java
+  s_fcad62e1c1292d::t_5c124dd3375b79 305-306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "8f4b59a0249a2453686279fa21cd3ea54cfa9aa5",
+  "prompts": {},
+  "sessions": {
+    "s_fcad62e1c1292d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ffcf7158-827e-4d49-9b3a-d38b1694a2d7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manan Mangal <mananmangal@gmail.com>"
+    }
+  }
+}

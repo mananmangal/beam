@@ -1,0 +1,25 @@
+sdks/java/io/iceberg/src/test/java/org/apache/beam/sdk/io/iceberg/IcebergUtilsTest.java
+  s_fcad62e1c1292d::t_5ec821c1e2b6c6 298-368,370,375,377-378,380,382
+  s_fcad62e1c1292d::t_062037c963d3e3 369,371-374,376,379,381,389-391
+sdks/java/io/iceberg/src/main/java/org/apache/beam/sdk/io/iceberg/IcebergUtils.java
+  s_fcad62e1c1292d::t_0d0c75b770f839 566
+  s_fcad62e1c1292d::t_fa8281f79e7cc3 32,98-103,107,109-112,118-124,126-127,131-136,139-140,545-547
+CHANGES.md
+  s_fcad62e1c1292d::t_ef23cf9854d34b 133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "a309b719e3b4178dc7bd2ff5be17bfca1ca6cada",
+  "prompts": {},
+  "sessions": {
+    "s_fcad62e1c1292d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ffcf7158-827e-4d49-9b3a-d38b1694a2d7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Manan Mangal <mananmangal@gmail.com>"
+    }
+  }
+}
